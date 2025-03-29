@@ -8,15 +8,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::bail;
-use axum::Router;
-use axum::body::Body;
-use axum::extract;
-use axum::extract::Path;
-use axum::http::StatusCode;
-use axum::http::header;
-use axum::response::IntoResponse;
-use axum::response::Response;
-use axum::routing::get;
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
@@ -33,12 +24,12 @@ use ravif::EncodedImage;
 use ravif::Encoder;
 use ravif::Img;
 use tokio::net::TcpListener;
-use tokio::task::spawn_blocking;
-use tower::limit::ConcurrencyLimitLayer;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::instrument;
+
+use crate::server::router;
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -122,12 +113,6 @@ struct Convert {
     output: PathBuf,
 }
 
-#[derive(Clone, Debug)]
-struct State {
-    config: Arc<Config>,
-    images: Arc<PathBuf>,
-}
-
 #[derive(Clone, Debug, Copy)]
 enum ResizeTo {
     Width(u32),
@@ -149,7 +134,7 @@ fn main() -> anyhow::Result<()> {
         }) => {
             assert!(images.is_dir());
             let config = cli.config;
-            let state = State {
+            let state = server::State {
                 images: Arc::new(images),
                 config: Arc::new(config),
             };
@@ -157,16 +142,10 @@ fn main() -> anyhow::Result<()> {
                 .enable_all()
                 .build()?
                 .block_on(async {
-                    let app = Router::new()
-                        .route("/images/resized/{width}/{height}/{image}", get(h_wh))
-                        .route("/images/resized/width/{width}/{image}", get(h_w))
-                        .route("/images/resized/height/{width}/{image}", get(h_h))
-                        .route("/images/resized/scale/{scale}/{image}", get(h_s))
-                        .layer(ConcurrencyLimitLayer::new(concurrency_limit))
-                        .with_state(state);
+                    let router = router(concurrency_limit, state);
                     let listener = TcpListener::bind(&addr).await?;
                     info!(?addr, "serving");
-                    axum::serve(listener, app).await
+                    axum::serve(listener, router).await
                 })?;
         }
         Command::Convert(Convert {
@@ -196,48 +175,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn h_wh(
-    extract::State(state): extract::State<State>,
-    Path((width, height, image)): Path<(u32, u32, String)>,
-) -> Result<Avif, Error> {
-    let image = state.images.join(&image);
-    load_resize_encode_async(state.config, image, ResizeTo::WidthAndHeight(width, height)).await
-}
-
-async fn h_w(
-    extract::State(state): extract::State<State>,
-    Path((width, image)): Path<(u32, String)>,
-) -> Result<Avif, Error> {
-    let image = state.images.join(&image);
-    load_resize_encode_async(state.config, image, ResizeTo::Width(width)).await
-}
-
-async fn h_h(
-    extract::State(state): extract::State<State>,
-    Path((height, image)): Path<(u32, String)>,
-) -> Result<Avif, Error> {
-    let image = state.images.join(&image);
-    load_resize_encode_async(state.config, image, ResizeTo::Height(height)).await
-}
-
-async fn h_s(
-    extract::State(state): extract::State<State>,
-    Path((scale, image)): Path<(f64, String)>,
-) -> Result<Avif, Error> {
-    let image = state.images.join(&image);
-    load_resize_encode_async(state.config, image, ResizeTo::Scale(scale)).await
-}
-
-async fn load_resize_encode_async(
-    config: impl Borrow<Config> + Send + 'static,
-    image: impl AsRef<path::Path> + Send + 'static,
-    to: ResizeTo,
-) -> Result<Avif, Error> {
-    let image = spawn_blocking(move || load_resize_encode(config, image.as_ref(), to))
-        .await
-        .unwrap()?;
-    Ok(Avif(image))
-}
+mod server;
 
 #[instrument(skip_all)]
 fn load(image: &path::Path) -> Result<RgbaImage, Error> {
@@ -320,7 +258,10 @@ fn encode(image: Image, quality: f32, speed: u8) -> Result<EncodedImage, Error> 
     let bytes = res.avif_file.len();
     #[allow(clippy::cast_precision_loss)]
     let kilobytes = bytes as f64 / 1024.0;
-    debug!(elapsed_secs = elapsed.as_secs_f64(), kilobytes, "encoded image");
+    debug!(
+        elapsed_secs = elapsed.as_secs_f64(),
+        kilobytes, "encoded image"
+    );
     Ok(res)
 }
 
@@ -338,17 +279,6 @@ fn load_resize_encode(
     let elapsed = begin.elapsed();
     debug!(elapsed_secs = elapsed.as_secs_f64(), "done");
     Ok(encoded)
-}
-
-struct Avif(EncodedImage);
-
-impl IntoResponse for Avif {
-    fn into_response(self) -> Response {
-        axum::response::Response::builder()
-            .header(header::CONTENT_TYPE, "image/avif")
-            .body(Body::from(self.0.avif_file))
-            .unwrap()
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -369,18 +299,6 @@ impl From<ImageError> for Error {
     fn from(value: ImageError) -> Self {
         Self::FailedToResize {
             message: value.to_string(),
-        }
-    }
-}
-
-impl IntoResponse for Error {
-    fn into_response(self) -> Response {
-        error!(error=%self, error_dbg=?self);
-        match self {
-            Error::NotFound => (StatusCode::NOT_FOUND, "not found").into_response(),
-            Error::FailedToResize { message } => {
-                (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
-            }
         }
     }
 }
