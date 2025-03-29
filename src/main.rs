@@ -31,6 +31,8 @@ use tracing::instrument;
 
 use crate::server::router;
 
+mod server;
+
 #[derive(Parser, Debug)]
 struct Cli {
     #[command(subcommand)]
@@ -174,8 +176,6 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-
-mod server;
 
 #[instrument(skip_all)]
 fn load(image: &path::Path) -> Result<RgbaImage, Error> {
