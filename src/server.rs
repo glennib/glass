@@ -11,7 +11,6 @@ use axum::http::header;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::routing::get;
-use ravif::EncodedImage;
 use tokio::task::spawn_blocking;
 use tower::limit::ConcurrencyLimitLayer;
 use tracing::error;
@@ -27,13 +26,13 @@ pub struct State {
     pub images: Arc<PathBuf>,
 }
 
-struct Avif(EncodedImage);
+struct Avif(Vec<u8>);
 
 impl IntoResponse for Avif {
     fn into_response(self) -> Response {
         axum::response::Response::builder()
             .header(header::CONTENT_TYPE, "image/avif")
-            .body(Body::from(self.0.avif_file))
+            .body(Body::from(self.0))
             .unwrap()
     }
 }

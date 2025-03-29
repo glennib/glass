@@ -17,12 +17,12 @@ use fast_image_resize::ResizeOptions;
 use fast_image_resize::Resizer;
 use fast_image_resize::images::Image;
 use image::DynamicImage;
+use image::ExtendedColorType;
+use image::ImageEncoder;
 use image::ImageError;
 use image::ImageReader;
 use image::RgbaImage;
-use ravif::EncodedImage;
-use ravif::Encoder;
-use ravif::Img;
+use image::codecs::avif;
 use tokio::net::TcpListener;
 use tracing::debug;
 use tracing::error;
@@ -168,7 +168,7 @@ fn main() -> anyhow::Result<()> {
             };
             let image = load_resize_encode(cli.config, &image, to)?;
             let begin = Instant::now();
-            fs::write(&output, image.avif_file)?;
+            fs::write(&output, image)?;
             let elapsed = begin.elapsed();
             debug!(elapsed_secs = elapsed.as_secs_f64(), output=%output.display(), "wrote");
         }
@@ -241,28 +241,29 @@ fn resize(
 }
 
 #[instrument(skip_all)]
-fn encode(image: Image, quality: f32, speed: u8) -> Result<EncodedImage, Error> {
+fn encode(image: Image, quality: f32, speed: u8) -> Result<Vec<u8>, Error> {
     let begin = Instant::now();
-    let rgba: &[rgb::Rgba<u8>] = rgb::bytemuck::cast_slice(image.buffer());
-    let img = Img::new(
-        rgba,
-        usize::try_from(image.width()).unwrap(),
-        usize::try_from(image.height()).unwrap(),
-    );
-    let res = Encoder::new()
-        .with_quality(quality)
-        .with_speed(speed)
-        .encode_rgba(img)
-        .unwrap();
-    let elapsed = begin.elapsed();
-    let bytes = res.avif_file.len();
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let quality = quality.round() as u8;
+
+    let mut encoded = Vec::new();
+    let encoder = avif::AvifEncoder::new_with_speed_quality(&mut encoded, speed, quality);
+    encoder.write_image(
+        image.buffer(),
+        image.width(),
+        image.height(),
+        ExtendedColorType::Rgba8,
+    )?;
+    let bytes = encoded.len();
     #[allow(clippy::cast_precision_loss)]
     let kilobytes = bytes as f64 / 1024.0;
+    let elapsed = begin.elapsed();
     debug!(
         elapsed_secs = elapsed.as_secs_f64(),
         kilobytes, "encoded image"
     );
-    Ok(res)
+    Ok(encoded)
 }
 
 #[instrument(skip(config))]
@@ -270,7 +271,7 @@ fn load_resize_encode(
     config: impl Borrow<Config> + 'static,
     image: &path::Path,
     to: ResizeTo,
-) -> Result<EncodedImage, Error> {
+) -> Result<Vec<u8>, Error> {
     let config = config.borrow();
     let begin = Instant::now();
     let original = load(image)?;
