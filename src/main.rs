@@ -123,6 +123,33 @@ enum ResizeTo {
     Scale(f64),
 }
 
+#[derive(Debug, Clone)]
+struct Encoded {
+    bytes: Vec<u8>,
+    encoding: Encoding,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum Encoding {
+    Avif,
+    Jpeg,
+}
+
+impl Encoded {
+    pub fn encoding(&self) -> Encoding {
+        self.encoding
+    }
+}
+
+impl Encoding {
+    fn mime(self) -> &'static str {
+        match self {
+            Encoding::Avif => "image/avif",
+            Encoding::Jpeg => "image/jpeg",
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
@@ -166,9 +193,9 @@ fn main() -> anyhow::Result<()> {
                     bail!("provide one or both of width and height, or only scale");
                 }
             };
-            let image = load_resize_encode(cli.config, &image, to)?;
+            let image = load_resize_encode(cli.config, &image, Encoding::Avif, to)?;
             let begin = Instant::now();
-            fs::write(&output, image)?;
+            fs::write(&output, image.bytes)?;
             let elapsed = begin.elapsed();
             debug!(elapsed_secs = elapsed.as_secs_f64(), output=%output.display(), "wrote");
         }
@@ -241,7 +268,7 @@ fn resize(
 }
 
 #[instrument(skip_all)]
-fn encode(image: Image, quality: f32, speed: u8) -> Result<Vec<u8>, Error> {
+fn encode(image: Image, _encoding: Encoding, quality: f32, speed: u8) -> Result<Encoded, Error> {
     let begin = Instant::now();
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -263,20 +290,24 @@ fn encode(image: Image, quality: f32, speed: u8) -> Result<Vec<u8>, Error> {
         elapsed_secs = elapsed.as_secs_f64(),
         kilobytes, "encoded image"
     );
-    Ok(encoded)
+    Ok(Encoded {
+        encoding: Encoding::Avif,
+        bytes: encoded,
+    })
 }
 
 #[instrument(skip(config))]
 fn load_resize_encode(
     config: impl Borrow<Config> + 'static,
     image: &path::Path,
+    encoding: Encoding,
     to: ResizeTo,
-) -> Result<Vec<u8>, Error> {
+) -> Result<Encoded, Error> {
     let config = config.borrow();
     let begin = Instant::now();
     let original = load(image)?;
     let resized = resize(original, to, config.filter_type)?;
-    let encoded = encode(resized, config.quality, config.speed)?;
+    let encoded = encode(resized, encoding, config.quality, config.speed)?;
     let elapsed = begin.elapsed();
     debug!(elapsed_secs = elapsed.as_secs_f64(), "done");
     Ok(encoded)
