@@ -54,15 +54,21 @@ impl FromStr for Encoding {
 pub fn router(concurrency_limit: usize, state: State) -> Router {
     Router::new()
         .route(
-            "/images/resized/{width}/{height}/{image}/{encoding}",
+            "/images/{image}/size/{width}/{height}/encoding/{encoding}",
             get(h_wh),
         )
-        .route("/images/resized/width/{width}/{image}/{encoding}", get(h_w))
         .route(
-            "/images/resized/height/{width}/{image}/{encoding}",
+            "/images/{image}/size/width/{width}/encoding/{encoding}",
+            get(h_w),
+        )
+        .route(
+            "/images/{image}/size/height/{width}/encoding/{encoding}",
             get(h_h),
         )
-        .route("/images/resized/scale/{scale}/{image}/{encoding}", get(h_s))
+        .route(
+            "/images/{image}/size/scale/{scale}/encoding/{encoding}",
+            get(h_s),
+        )
         .layer(ConcurrencyLimitLayer::new(concurrency_limit))
         .with_state(state)
 }
@@ -81,7 +87,7 @@ impl IntoResponse for Error {
 
 async fn h_wh(
     extract::State(state): extract::State<State>,
-    extract::Path((width, height, image, encoding)): extract::Path<(u32, u32, String, String)>,
+    extract::Path((image, width, height, encoding)): extract::Path<(String, u32, u32, String)>,
 ) -> Result<Encoded, Error> {
     let image = state.images.join(&image);
     load_resize_encode_async(
@@ -95,7 +101,7 @@ async fn h_wh(
 
 async fn h_w(
     extract::State(state): extract::State<State>,
-    extract::Path((width, image, encoding)): extract::Path<(u32, String, String)>,
+    extract::Path((image, width, encoding)): extract::Path<(String, u32, String)>,
 ) -> Result<Encoded, Error> {
     let image = state.images.join(&image);
     load_resize_encode_async(
@@ -109,7 +115,7 @@ async fn h_w(
 
 async fn h_h(
     extract::State(state): extract::State<State>,
-    extract::Path((height, image, encoding)): extract::Path<(u32, String, String)>,
+    extract::Path((image, height, encoding)): extract::Path<(String, u32, String)>,
 ) -> Result<Encoded, Error> {
     let image = state.images.join(&image);
     load_resize_encode_async(
@@ -123,7 +129,7 @@ async fn h_h(
 
 async fn h_s(
     extract::State(state): extract::State<State>,
-    extract::Path((scale, image, encoding)): extract::Path<(f64, String, String)>,
+    extract::Path((image, scale, encoding)): extract::Path<(String, f64, String)>,
 ) -> Result<Encoded, Error> {
     let image = state.images.join(&image);
     load_resize_encode_async(
