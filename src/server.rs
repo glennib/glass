@@ -31,8 +31,13 @@ pub struct State {
 
 impl IntoResponse for Encoded {
     fn into_response(self) -> Response {
+        let name = self.name.as_deref().unwrap_or("image");
         axum::response::Response::builder()
             .header(header::CONTENT_TYPE, self.encoding().mime())
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{name}.{}\"", self.encoding.extension()),
+            )
             .body(Body::from(self.bytes))
             .unwrap()
     }

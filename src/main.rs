@@ -125,6 +125,7 @@ enum ResizeTo {
 
 #[derive(Debug, Clone)]
 struct Encoded {
+    name: Option<String>,
     bytes: Vec<u8>,
     encoding: Encoding,
 }
@@ -146,6 +147,13 @@ impl Encoding {
         match self {
             Encoding::Avif => "image/avif",
             Encoding::Jpeg => "image/jpeg",
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Encoding::Avif => "avif",
+            Encoding::Jpeg => "jpg",
         }
     }
 }
@@ -291,6 +299,7 @@ fn encode(image: Image, _encoding: Encoding, quality: f32, speed: u8) -> Result<
         kilobytes, "encoded image"
     );
     Ok(Encoded {
+        name: None,
         encoding: Encoding::Avif,
         bytes: encoded,
     })
@@ -307,7 +316,10 @@ fn load_resize_encode(
     let begin = Instant::now();
     let original = load(image)?;
     let resized = resize(original, to, config.filter_type)?;
-    let encoded = encode(resized, encoding, config.quality, config.speed)?;
+    let mut encoded = encode(resized, encoding, config.quality, config.speed)?;
+    encoded.name = image
+        .file_stem()
+        .map(|name| name.to_str().unwrap().to_string());
     let elapsed = begin.elapsed();
     debug!(elapsed_secs = elapsed.as_secs_f64(), "done");
     Ok(encoded)
