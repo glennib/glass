@@ -271,7 +271,9 @@ fn resize(
             message: error.to_string(),
         })?;
     let elapsed = begin.elapsed();
-    debug!(elapsed_secs = elapsed.as_secs_f64(), "resized");
+    #[allow(clippy::cast_precision_loss)]
+    let kilobytes = resized.buffer().len() as f64 / 1024.0;
+    debug!(elapsed_secs = elapsed.as_secs_f64(), kilobytes, "resized");
     Ok(resized)
 }
 
